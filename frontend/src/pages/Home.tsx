@@ -124,7 +124,7 @@ export function Home({ onReport }: Props) {
               color="pink"
               icon={<FileIcon className="w-5 h-5 sm:w-6 sm:h-6" />}
               title="SHOWS THE BYTES"
-              subtitle="Every finding includes the recovered text in a monospace box — the proof, not the promise."
+              subtitle="Every finding includes the recovered text in a monospace box. The proof, not the promise."
             />
           </div>
           <div className="landing-feature">
