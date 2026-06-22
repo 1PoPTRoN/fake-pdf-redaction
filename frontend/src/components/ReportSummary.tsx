@@ -56,11 +56,12 @@ export function ReportSummary({ report }: Props) {
         className={[
           "brutal-stamp",
           "font-display uppercase leading-[0.85]",
-          "text-[22vw] sm:text-[9rem] tracking-tight",
+          "tracking-tight",
           "border-5 border-ink shadow-brutalXl",
           "px-6 sm:px-10 py-3 sm:py-5",
           stampClass,
         ].join(" ")}
+        style={{ fontSize: "clamp(2rem, 18vw, 8rem)" }}
       >
         {stampText}
       </h1>
