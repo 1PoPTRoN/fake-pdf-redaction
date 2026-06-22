@@ -7,14 +7,15 @@ __pycache__/
 *$py.class
 *.so
 .Python
+# Python build dirs (top-level only — frontend/src/lib is intentionally not ignored)
 build/
 develop-eggs/
-dist/
+dist/  # Python dist; frontend dist/ lives in .vercel/ when deployed
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -58,3 +59,7 @@ dmypy.json
 tests/fixtures/*.pdf
 tests/output/
 tests/.tmp/
+
+# Deployment tool caches
+.render/
+.vercel/
