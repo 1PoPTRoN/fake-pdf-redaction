@@ -221,6 +221,40 @@ export function Home({ onReport }: Props) {
             </span>
             <span>BUILT WITH BRUTAL HONESTY</span>
           </div>
+          {/* ATTRIBUTION ROW — kept below the main footer line so it doesn't
+              compete with the primary CTA. Sits on the same dark band, right-
+              aligned. Internship/contact context: who built it, who's it for,
+              how to reach the author. */}
+          <div className="border-t-2 border-paper/20">
+            <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 font-mono text-xs sm:text-sm">
+              <a
+                href="https://digitalheroesco.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-paper bg-paper text-ink font-display uppercase tracking-wider shadow-brutalSm hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+              >
+                Built for Digital Heroes
+                <span aria-hidden>↗</span>
+              </a>
+              <span className="text-paper/90">
+                <a
+                  href="mailto:vrxn.arp1traj@gmail.com"
+                  className="hover:underline"
+                >
+                  Arpit Raj
+                </a>
+                <span className="text-paper/50"> · </span>
+                <span className="text-paper/70">1PoPTRoN</span>
+                <span className="text-paper/50"> · </span>
+                <a
+                  href="mailto:vrxn.arp1traj@gmail.com"
+                  className="hover:underline"
+                >
+                  vrxn.arp1traj@gmail.com
+                </a>
+              </span>
+            </div>
+          </div>
         </footer>
 
         <Toast message={toast} onDismiss={() => setToast(null)} />
