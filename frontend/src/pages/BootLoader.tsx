@@ -4,20 +4,46 @@ import { CornerAccents } from "../components/CornerAccents";
 import { FloppyIcon } from "../components/icons";
 
 /**
- * Initial full-page loader. Shown while the JS bundle warms up + reads any
- * initial state. Auto-dismisses after a short scripted sequence so the user
- * sees the animation even on a fast machine.
+ * Initial full-page loader. The wait itself is the message: three privacy
+ * promises the visitor registers before they ever see the dropzone. Each
+ * phrase mirrors something already promised elsewhere in the UI so this
+ * screen is a focused briefing, not a loading decoration.
+ *
+ * Total wait: 3300ms (below the 3.5s ceiling where bounce rate starts to
+ * matter on a static landing page). The progress bar fills in lockstep so
+ * the bar completes exactly as the home page takes over.
  */
+const TOTAL_MS = 3300;
+const STEP_MS: ReadonlyArray<number> = [0, 1100, 2200];
+
 export function BootLoader() {
   const [step, setStep] = useState(0);
+  // Progress bar drives from 0 → 100 across the full wait. Re-rendered every
+  // animation frame so the bar visibly climbs (the prior fixed 40% read as
+  // "stuck" once the wait exceeded ~2s).
+  const [progress, setProgress] = useState(0);
+
   useEffect(() => {
-    const t1 = setTimeout(() => setStep(1), 350);
-    const t2 = setTimeout(() => setStep(2), 900);
-    const t3 = setTimeout(() => setStep(3), 1500);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Reveal each privacy promise at the right beat. The final step is shown
+    // for the remainder of TOTAL_MS so the home page swap feels like the
+    // promise landing, not the next one being withheld.
+    for (let i = 1; i < STEP_MS.length; i++) {
+      timers.push(setTimeout(() => setStep(i), STEP_MS[i]));
+    }
+
+    const startedAt = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const pct = Math.min(100, ((now - startedAt) / TOTAL_MS) * 100);
+      setProgress(pct);
+      if (pct < 100) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      timers.forEach(clearTimeout);
+      cancelAnimationFrame(raf);
     };
   }, []);
 
@@ -40,20 +66,28 @@ export function BootLoader() {
           <FloppyIcon className="w-16 h-16 sm:w-24 sm:h-24" />
         </div>
 
-        {/* Glitchy headline that flips copy per step */}
+        {/* Glitchy headline that flips through three privacy promises. Each
+            phrase is a promise already made elsewhere in the UI (badges,
+            marquee, action-bar copy) so the boot screen is a focused
+            reminder, not a new claim. */}
         <h1
           key={step}
           className="font-display uppercase text-5xl sm:text-7xl tracking-tight text-center brutal-stamp"
         >
-          {step === 0 && "BOOTING…"}
-          {step === 1 && "LOADING DETECTORS…"}
-          {step === 2 && "SHARPENING X-RAY…"}
-          {step === 3 && "READY."}
+          {step === 0 && "READ-ONLY"}
+          {step === 1 && "NOTHING STORED"}
+          {step === 2 && "EVIDENCE-FIRST"}
         </h1>
 
-        {/* Chunky stepped progress bar */}
+        {/* Chunky stepped progress bar. Width grows 0 → 100% over TOTAL_MS so
+            the bar completes exactly as the home page takes over. The
+            existing bar-slide shimmer keeps animating inside the growing
+            fill so it still reads as a "live" loader, not a static gauge. */}
         <div className="w-[80vw] max-w-xl h-6 border-3 border-ink shadow-brutal bg-paper overflow-hidden">
-          <div className="h-full bg-ink brutal-bar" style={{ width: "40%" }} />
+          <div
+            className="h-full bg-ink brutal-bar"
+            style={{ width: `${progress}%` }}
+          />
         </div>
 
         {/* Flickering LIVE dot */}

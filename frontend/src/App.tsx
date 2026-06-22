@@ -15,8 +15,11 @@ export default function App() {
   const [result, setResult] = useState<Result | null>(null);
 
   useEffect(() => {
-    // Auto-dismiss the boot loader after the staged animation finishes.
-    const t = setTimeout(() => setBooted(true), 2200);
+    // Boot screen total wait is 3.3s (matches BootLoader.tsx TOTAL_MS). The
+    // boot screen's three privacy promises are the message, not a side effect
+    // of bundle loading — they need time to land, so we hold the home page
+    // until they've all flashed once.
+    const t = setTimeout(() => setBooted(true), 3300);
     return () => clearTimeout(t);
   }, []);
 
