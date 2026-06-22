@@ -16,7 +16,23 @@ Severity = Literal["info", "low", "medium", "high", "critical"]
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok"] = "ok"
+    """Readiness signal for the home-page status pill.
+
+    `status` distinguishes three real states:
+      - "warming": detector imports / Engine() init have not finished yet. The
+        process is up but a scan would block on import. The frontend shows a
+        "LAUNCHING" pill so the user knows to wait.
+      - "ok": everything is warm. The pill shows "BACKEND LIVE".
+      - "degraded": warmup failed (e.g. an optional dep was missing). The
+        process is up but the engine may not scan. Surfaces a real error.
+
+    A free-tier cold start returns "warming" with HTTP 503 until warmup
+    completes, then "ok" with HTTP 200. The frontend must read the body, not
+    just the status code.
+    """
+    status: Literal["ok", "warming", "degraded"] = "warming"
+    detail: str = ""
+    vectors_ready: int = 0
 
 
 class ErrorResponse(BaseModel):

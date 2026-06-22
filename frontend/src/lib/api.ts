@@ -49,14 +49,54 @@ export async function fetchVectors(): Promise<VectorInfo[]> {
   return j.vectors;
 }
 
-/** Lightweight reachability check for the home-page status pill.
- *  Returns true on any 2xx, false on network error or non-2xx. Never throws. */
-export async function fetchHealth(): Promise<boolean> {
+/** Backend health snapshot returned by GET /api/v1/health.
+ *  Mirrors backend/app/schemas.py:HealthResponse. */
+export type BackendStatus = "ok" | "warming" | "degraded";
+
+export type HealthSnapshot = {
+  status: BackendStatus;
+  detail: string;
+  vectors_ready: number;
+};
+
+/** Reachability + readiness check for the home-page status pill.
+ *
+ *  Returns one of four outcomes so the pill can distinguish a backend that is
+ *  simply slow to respond from one that is genuinely offline:
+ *    - {kind: "ok",       ...}     — backend is up and warm
+ *    - {kind: "warming",  ...}     — backend is up but the detector engine is
+ *                                    still importing (cold start). The user
+ *                                    should wait, not retry.
+ *    - {kind: "degraded", ...}     — backend responded but warmup failed
+ *    - {kind: "down"}              — network error or non-2xx with no body
+ *
+ *  Never throws. */
+export async function fetchHealth(): Promise<
+  | { kind: "ok"; snapshot: HealthSnapshot; latency: number }
+  | { kind: "warming"; snapshot: HealthSnapshot; latency: number }
+  | { kind: "degraded"; snapshot: HealthSnapshot; latency: number }
+  | { kind: "down" }
+> {
+  const start = performance.now();
   try {
     const r = await fetch(`${API_BASE}/health`, { method: "GET", cache: "no-store" });
-    return r.ok;
+    const latency = Math.round(performance.now() - start);
+    // Read the body regardless of status — the backend uses 503 + status:warming
+    // to mean "alive but not ready yet", which is a perfectly valid state to
+    // show on the pill (as LAUNCHING, not DOWN).
+    let body: HealthSnapshot = { status: "warming", detail: "", vectors_ready: 0 };
+    try {
+      body = (await r.json()) as HealthSnapshot;
+    } catch {
+      // Body wasn't JSON; fall through with the default warming state.
+    }
+    if (body.status === "ok") return { kind: "ok", snapshot: body, latency };
+    if (body.status === "warming") return { kind: "warming", snapshot: body, latency };
+    if (body.status === "degraded") return { kind: "degraded", snapshot: body, latency };
+    // Unknown body shape — treat as down so the user gets the wake link.
+    return { kind: "down" };
   } catch {
-    return false;
+    return { kind: "down" };
   }
 }
 

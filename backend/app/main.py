@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +23,51 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 _MULTIPART_OVERHEAD = 4096
 
 
+# Module-level readiness flag. Set to a tuple (status, detail, vectors_ready)
+# by the lifespan handler before the first request is served. The /health
+# endpoint reads this on every call so it reflects the true warmup state, not
+# just "the port is bound".
+#
+# Starting value is ("warming", "starting up", 0) so a /health hit that races
+# the lifespan handler still reports "warming" instead of falsely "ok".
+_READINESS: tuple[str, str, int] = ("warming", "starting up", 0)
+
+
+def _set_readiness(status: str, detail: str = "", vectors_ready: int = 0) -> None:
+    global _READINESS
+    _READINESS = (status, detail, vectors_ready)
+    logger.info("readiness=%s detail=%r vectors_ready=%d", status, detail, vectors_ready)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Warm the detector engine at startup so /health can answer truthfully.
+
+    On free-tier hosts (Render) the process gets restarted on cold start. The
+    FastAPI port binds almost immediately, but the first scan would otherwise
+    pay the full pdfaudit / pikepdf / pdfminer import cost — and a status pill
+    that said "live" during that window would lie. We do that import work
+    here, once, and only then flip readiness to "ok".
+    """
+    _set_readiness("warming", "loading detector engine")
+    try:
+        # Importing pdfaudit + constructing Engine() forces the pikepdf,
+        # pdfminer.six, and defusedxml modules to load. Anything that would
+        # otherwise happen on the first /scan request, happens here instead.
+        from pdfaudit import Engine  # noqa: WPS433 (intentional startup import)
+
+        engine = Engine()
+        ready_vectors = len(engine.available_vectors())
+        _set_readiness("ok", "", ready_vectors)
+        logger.info("detector engine warmed: %d vectors ready", ready_vectors)
+    except Exception as exc:  # pragma: no cover — surface a real failure
+        logger.exception("detector warmup failed")
+        _set_readiness("degraded", f"{type(exc).__name__}: {exc}", 0)
+    yield
+    # Shutdown hook (nothing to do — Engine() is stateless and pikepdf closes
+    # the BytesIO it was opened from on its own).
+
+
 def create_app() -> FastAPI:
     _ = get_limits()  # resolved per-request inside routes; called here to surface bad env at boot
     app = FastAPI(
@@ -29,6 +75,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         redoc_url=None,
+        lifespan=_lifespan,
     )
 
     # CORS — explicit allow-list from env (defaults to localhost dev origins),
@@ -104,8 +151,22 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["meta"])
-    async def health() -> HealthResponse:
-        return HealthResponse()
+    async def health() -> JSONResponse:
+        """Readiness probe. Returns 200 only when the engine is truly warm.
+
+        A cold start returns 503 + "warming" so the frontend status pill can
+        render "LAUNCHING…" instead of falsely advertising "LIVE". The body
+        carries the vectors_ready count so the UI can show progress if it
+        wants to.
+        """
+        status, detail, vectors_ready = _READINESS
+        body = HealthResponse(
+            status=status,  # type: ignore[arg-type]
+            detail=detail,
+            vectors_ready=vectors_ready,
+        ).model_dump()
+        http_status = 200 if status == "ok" else 503
+        return JSONResponse(status_code=http_status, content=body)
 
     app.include_router(vectors.router, prefix="/api/v1", tags=["meta"])
     app.include_router(scan.router, prefix="/api/v1", tags=["scan"])
