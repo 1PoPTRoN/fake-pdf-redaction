@@ -2,9 +2,13 @@
 
     pdfaudit scan FILE [--json] [--only VEC,VEC] [--fail-on LEVEL] [--no-color]
 
-Exit code is the worst severity mapped against ``--fail-on`` so it drops cleanly
-into CI: 0 = clean (or below threshold), 2 = at/above threshold, 1 = usage/IO
-error. ``--list-vectors`` prints the available detector names.
+Exit code drops cleanly into CI:
+  0 = clean / below threshold AND every detector ran
+  2 = a finding at or above ``--fail-on`` (default high)
+  3 = scan incomplete — a detector errored, so "clean" cannot be certified
+      (suppress with ``--no-fail-on-error``)
+  1 = usage / I/O error
+``list-vectors`` prints the available detector names.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from .reporters import to_json, format_cli
 _EXIT_OK = 0
 _EXIT_ERROR = 1
 _EXIT_FINDINGS = 2
+_EXIT_INCOMPLETE = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,9 +42,27 @@ def build_parser() -> argparse.ArgumentParser:
                       choices=[s.label for s in Severity],
                       help="Minimum severity that causes a non-zero exit (default: high).")
     scan.add_argument("--no-color", action="store_true", help="Disable ANSI colour.")
+    scan.add_argument("--no-fail-on-error", action="store_true",
+                      help="Do not exit 3 when a detector errors (default: a detector "
+                           "error fails the gate, since 'clean' cannot be certified).")
+    scan.add_argument("--max-memory", type=int, default=None, metavar="MB",
+                      help="Cap address space (MiB) so a decompression bomb fails safely "
+                           "instead of exhausting memory. Unix only; best-effort.")
 
     sub.add_parser("list-vectors", help="List available detector names.")
     return parser
+
+
+def _apply_memory_limit(mb: int) -> None:
+    try:
+        import resource
+
+        limit = mb * 1024 * 1024
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        new_hard = hard if hard != resource.RLIM_INFINITY and hard < limit else limit
+        resource.setrlimit(resource.RLIMIT_AS, (limit, new_hard))
+    except Exception:
+        pass  # not supported on this platform; --max-memory is best-effort
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,7 +76,10 @@ def main(argv: list[str] | None = None) -> int:
         return _EXIT_OK
 
     # scan
-    only = [v.strip() for v in args.only.split(",")] if args.only else None
+    if args.max_memory:
+        _apply_memory_limit(args.max_memory)
+
+    only = [v.strip() for v in args.only.split(",") if v.strip()] if args.only else None
     if only:
         unknown = set(only) - set(engine.available_vectors())
         if unknown:
@@ -87,6 +113,10 @@ def main(argv: list[str] | None = None) -> int:
     worst = report.worst_severity
     if worst is not None and worst >= threshold:
         return _EXIT_FINDINGS
+    # A detector that errored did not get to verify the document, so a sub-threshold
+    # result is "incomplete", not "clean" — fail the gate unless explicitly told not to.
+    if report.detector_errors and not args.no_fail_on_error:
+        return _EXIT_INCOMPLETE
     return _EXIT_OK
 
 

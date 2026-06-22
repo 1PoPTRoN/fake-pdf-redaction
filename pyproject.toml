@@ -9,8 +9,11 @@ description = "Read-only auditor that detects recoverable content behind PDF red
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pikepdf>=8",
-    "pdfminer.six>=20221105",
+    # Upper bounds pin the parsing behaviour of a security tool against surprise
+    # breaking releases; bump deliberately after re-running the test corpus.
+    "pikepdf>=8,<12",
+    "pdfminer.six>=20221105,<20270101",
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]

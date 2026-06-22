@@ -115,6 +115,34 @@ def invisible_text() -> bytes:
     return buf.getvalue()
 
 
+def white_box_over_text() -> bytes:
+    """An *opaque white* rectangle over live text (the classic 'white-out')."""
+    buf = io.BytesIO()
+    c = Canvas(buf, pagesize=(612, 792))
+    _blank_identity_meta(c)
+    c.setFont("Helvetica", 14)
+    c.drawString(72, 700, "Account 4455-6677 PIN 8899 internal only")
+    c.setFillColorRGB(1, 1, 1)  # white, fully opaque — hides the text visually
+    c.rect(70, 694, 360, 22, stroke=0, fill=1)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def white_on_white_text() -> bytes:
+    """White text on the (white) page: invisible by colour, fully extractable."""
+    buf = io.BytesIO()
+    c = Canvas(buf, pagesize=(612, 792))
+    _blank_identity_meta(c)
+    c.setFont("Helvetica", 14)
+    c.drawString(72, 740, "Public notice.")  # visible (black)
+    c.setFillColorRGB(1, 1, 1)
+    c.drawString(72, 700, "Hidden source Maria Vargas code 7788")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def _base_text_pdf(line: str = "Quarterly public report. Nothing to see here.") -> bytes:
     buf = io.BytesIO()
     c = Canvas(buf, pagesize=(612, 792))
@@ -204,7 +232,9 @@ def clean_stripped() -> bytes:
 # --------------------------------------------------------------------------
 LEAKY: dict[str, callable] = {
     "box_over_text": box_over_text,
+    "white_box_over_text": white_box_over_text,
     "invisible_text": invisible_text,
+    "white_on_white_text": white_on_white_text,
     "incremental_redaction": incremental_redaction,
     "embedded_file": embedded_file,
     "metadata_leak": metadata_leak,

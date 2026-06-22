@@ -13,11 +13,13 @@ import util
 # fixture name -> (vector, minimum severity, [tokens that must appear in evidence])
 LEAK_EXPECTATIONS = {
     "box_over_text": ("covered_text", Severity.CRITICAL, ["123-45-6789"]),
+    "white_box_over_text": ("covered_text", Severity.HIGH, ["4455-6677", "8899"]),
     "invisible_text": ("hidden_text", Severity.CRITICAL, ["Robert", "4242"]),
+    "white_on_white_text": ("hidden_text", Severity.CRITICAL, ["Maria", "7788"]),
     "incremental_redaction": ("revision_history", Severity.CRITICAL, ["4200000", "Acme"]),
     "embedded_file": ("embedded_files", Severity.HIGH, ["payroll.csv"]),
     "metadata_leak": ("metadata", Severity.MEDIUM, ["Jane Insider", "SEALED-2026-00042"]),
-    "unapplied_redact": ("redact_annotations", Severity.CRITICAL, ["REDACTED"]),
+    "unapplied_redact": ("redact_annotations", Severity.CRITICAL, ["REDACTED", "Sarah Connor"]),
 }
 
 

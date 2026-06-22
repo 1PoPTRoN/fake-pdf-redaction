@@ -17,13 +17,19 @@ class Severity(IntEnum):
 
     Higher value = worse. ``INFO`` is informational (not necessarily a leak),
     ``CRITICAL`` is a confirmed recovery of content that was meant to be gone.
+
+    Values start at 1 (not 0) on purpose: every severity must be *truthy* so that
+    ``if report.worst_severity:`` can never silently treat an INFO-only document as
+    "no findings". The empty-report sentinel is ``None`` (see ``Report``), never a
+    falsy severity. Only the relative ordering and the labels are contractual; the
+    absolute integers are an internal detail (JSON always serialises the label).
     """
 
-    INFO = 0
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 3
-    CRITICAL = 4
+    INFO = 1
+    LOW = 2
+    MEDIUM = 3
+    HIGH = 4
+    CRITICAL = 5
 
     @property
     def label(self) -> str:

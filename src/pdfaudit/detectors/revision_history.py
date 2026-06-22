@@ -2,64 +2,97 @@
 
 THE DIFFERENTIATOR. A PDF grows by appending incremental updates; the bytes are
 never rewritten, only added to, and each appended revision ends with ``%%EOF``.
-That means the byte slice up to an *earlier* ``%%EOF`` is itself a complete,
-loadable earlier version of the document — the version before someone "redacted"
-or edited it.
+The byte slice up to an *earlier* ``%%EOF`` is itself a loadable earlier version of
+the document — the version before someone "redacted" or edited it.
 
-So the algorithm is pleasingly direct:
+Algorithm:
 
-1. Find every ``%%EOF`` marker in the raw bytes. N markers => N document states.
-2. For each earlier state, take ``raw_bytes[:eof_end]`` and load it as a
-   standalone PDF, then extract its text.
-3. Diff each earlier revision's text against the *current* (final) text. Any
-   word/line present earlier but absent now is recovered content that the latest
-   revision was trying to hide.
+1. Find *genuine* revision termini. A real appended revision ends ``startxref
+   <offset> %%EOF`` where ``offset`` points **backward**, into the prefix, at that
+   revision's own cross-reference (a classic ``xref`` table or an xref-stream
+   object). This single structural test rejects two whole classes of false
+   boundary that fooled a naive ``%%EOF`` scan: a literal ``%%EOF`` inside a content
+   stream/string, and a linearised file's internal ``%%EOF`` (whose ``startxref``
+   points *forward* to the main xref). N termini ⇒ N document states.
+2. For each earlier state, load ``raw_bytes[:eof_end]`` and extract its text.
+3. Diff each earlier revision's tokens against the current text as a *multiset*, so
+   a token whose count dropped (redacted on one page, still present elsewhere) is
+   still recovered.
 
-We do not hand-write an xref parser for v1 — the truncation trick exercises the
-real recovery path on standard appended-update files. Limitation (documented):
-linearised PDFs and some malformed updates won't truncate to a valid prefix; we
-catch that per-revision and skip it rather than failing the whole scan.
+If an earlier revision is a valid terminus but its text cannot be extracted
+(linearised/xref-stream prefixes pdfminer can't lay out), we do **not** report
+"clean" — we surface it as a HIGH "could not verify" finding, because an
+unreadable prior revision is unknown, not safe.
 """
 
 from __future__ import annotations
 
 import io
 import re
+from collections import Counter
 
-from pdfminer.high_level import extract_text
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LAParams
 
 from .base import Detector
-from ..document import PDFDocument
+from ..document import PDFDocument, iter_chars
 from ..model import Finding, Severity
 
 _EOF = b"%%EOF"
-_WORD_RE = re.compile(r"[^\s]+")
-# Ignore very short tokens when diffing so punctuation/layout noise doesn't
-# masquerade as "recovered" content.
-_MIN_TOKEN_LEN = 3
+# ``startxref <n>`` immediately before a ``%%EOF`` (allowing trailing EOL).
+_STARTXREF_RE = re.compile(rb"startxref\s+(\d+)\s*\Z")
+# An xref-stream cross-reference object header: ``<num> <gen> obj``.
+_XREF_OBJ_RE = re.compile(rb"\s*\d+\s+\d+\s+obj")
+# Keep tokens containing at least one alphanumeric (drops pure punctuation noise),
+# regardless of length, so short secrets ("4242", initials) are still recovered.
+_TOKEN_RE = re.compile(r"\S+")
+_ALNUM_RE = re.compile(r"[A-Za-z0-9]")
+# Cap the number of earlier states we fully parse, to bound work on a file crafted
+# with many revision termini (defence in depth alongside the structural check).
+_MAX_REVISIONS = 64
 
 
-def _eof_offsets(raw: bytes) -> list[int]:
-    offsets = []
+def _looks_like_xref_at(raw: bytes, off: int) -> bool:
+    seg = raw[off:off + 64]
+    return seg.lstrip()[:4] == b"xref" or _XREF_OBJ_RE.match(seg) is not None
+
+
+def _revision_boundaries(raw: bytes) -> list[int]:
+    """Offsets just past each *genuine* revision-terminating ``%%EOF``."""
+    boundaries: list[int] = []
     start = 0
     while True:
         idx = raw.find(_EOF, start)
         if idx == -1:
             break
-        offsets.append(idx + len(_EOF))
-        start = idx + len(_EOF)
-    return offsets
+        eof_end = idx + len(_EOF)
+        window = raw[max(0, idx - 128):idx]
+        m = _STARTXREF_RE.search(window)
+        if m:
+            off = int(m.group(1))
+            # Genuine appended revision: startxref points backward, into the prefix,
+            # at a real cross-reference. (Forward-pointing => linearised internal EOF.)
+            if 0 <= off < idx and _looks_like_xref_at(raw, off):
+                boundaries.append(eof_end)
+        start = eof_end
+    return boundaries
 
 
-def _safe_extract_text(data: bytes) -> str:
+def _text_from_bytes(data: bytes) -> str:
+    """Extract text from a standalone PDF byte string, matching the layout-based
+    tokenisation used for the current document (so the diff is apples-to-apples)."""
     try:
-        return extract_text(io.BytesIO(data)) or ""
+        parts: list[str] = []
+        for page in extract_pages(io.BytesIO(data), laparams=LAParams()):
+            for ch in iter_chars(page):
+                parts.append(ch.get_text())
+        return "".join(parts)
     except Exception:
         return ""
 
 
 def _tokens(text: str) -> list[str]:
-    return [t for t in _WORD_RE.findall(text) if len(t) >= _MIN_TOKEN_LEN]
+    return [t for t in _TOKEN_RE.findall(text) if _ALNUM_RE.search(t)]
 
 
 class RevisionHistoryDetector(Detector):
@@ -67,68 +100,91 @@ class RevisionHistoryDetector(Detector):
 
     def analyze(self, doc: PDFDocument) -> list[Finding]:
         raw = doc.raw_bytes
-        offsets = _eof_offsets(raw)
-        if len(offsets) <= 1:
+        boundaries = _revision_boundaries(raw)
+        if len(boundaries) <= 1:
             return []  # single revision: nothing to recover
 
+        total_revisions = len(boundaries)
+        earlier = boundaries[:-1][:_MAX_REVISIONS]
+
+        # Current text reuses the document's single cached pdfminer pass.
+        current_counter = Counter(_tokens(doc.layout_text()))
+
         findings: list[Finding] = []
-        num_updates = len(offsets) - 1
-
-        current_text = _safe_extract_text(raw)
-        current_tokens = set(_tokens(current_text))
-
         recovered_any = False
-        for rev_index, eof_end in enumerate(offsets[:-1], start=1):
-            prefix = raw[:eof_end]
-            earlier_text = _safe_extract_text(prefix)
+        unverifiable = 0
+
+        for rev_index, eof_end in enumerate(earlier, start=1):
+            earlier_text = _text_from_bytes(raw[:eof_end])
             if not earlier_text.strip():
+                unverifiable += 1
                 continue
-            earlier_tokens = _tokens(earlier_text)
-            # Preserve order + dedupe for readable evidence.
-            seen = set()
-            recovered = []
-            for tok in earlier_tokens:
-                if tok not in current_tokens and tok not in seen:
+            earlier_counter = Counter(_tokens(earlier_text))
+            diff = earlier_counter - current_counter  # multiset: counts that dropped
+            if not diff:
+                continue
+            # Preserve readable order from the earlier revision, deduped.
+            recovered: list[str] = []
+            seen: set[str] = set()
+            for tok in _tokens(earlier_text):
+                if diff.get(tok, 0) > 0 and tok not in seen:
                     seen.add(tok)
                     recovered.append(tok)
             if recovered:
                 recovered_any = True
-                snippet = " ".join(recovered[:60])
                 findings.append(
                     Finding(
                         vector=self.name,
                         severity=Severity.CRITICAL,
-                        page=None,
-                        evidence=snippet,
+                        evidence=" ".join(recovered[:60]),
                         description=(
-                            f"Revision {rev_index} of {num_updates + 1} contains text "
-                            f"that is absent from the current version. The document was "
-                            f"edited via an incremental update, leaving the prior content "
-                            f"recoverable from the file's revision history."
+                            f"Revision {rev_index} of {total_revisions} contains text that "
+                            f"is absent from (or reduced in) the current version. The "
+                            f"document was edited via an incremental update, leaving the "
+                            f"prior content recoverable from the file's revision history."
                         ),
                         recommendation=(
-                            "Re-save the document as a single linearised revision so "
-                            "earlier object states are discarded, then re-verify."
+                            "Re-save the document as a single linearised revision so earlier "
+                            "object states are discarded, then re-verify."
                         ),
                     )
                 )
 
-        if not recovered_any:
-            # Updates exist but no text diverged; still worth surfacing because
-            # incremental updates can carry removed objects, attachments, etc.
+        if unverifiable:
+            findings.append(
+                Finding(
+                    vector=self.name,
+                    severity=Severity.HIGH,
+                    evidence=f"{unverifiable} earlier revision(s) present but not parseable",
+                    description=(
+                        f"{unverifiable} earlier revision(s) could not be parsed for text "
+                        f"comparison (e.g. a linearised or xref-stream prefix). Their content "
+                        f"could not be verified and may still be recoverable — this is not a "
+                        f"clean result."
+                    ),
+                    recommendation=(
+                        "Flatten the file to a single revision and re-audit; if a finding "
+                        "persists, recover the prior revision with a full xref-chain tool."
+                    ),
+                )
+            )
+
+        if not recovered_any and not unverifiable:
+            # Genuine updates, all parsed, nothing diverged; still worth surfacing
+            # because incremental updates can carry removed objects/attachments.
             findings.append(
                 Finding(
                     vector=self.name,
                     severity=Severity.LOW,
-                    evidence=f"{num_updates} incremental update(s) detected",
+                    evidence=f"{len(earlier)} incremental update(s) detected",
                     description=(
-                        f"The file has {num_updates} incremental update(s) "
-                        f"({num_updates + 1} revisions). No divergent text was recovered, "
+                        f"The file has {len(earlier)} incremental update(s) "
+                        f"({total_revisions} revisions). No divergent text was recovered, "
                         f"but prior object states are retained in the file."
                     ),
                     recommendation=(
-                        "Flatten to a single revision before distribution if the "
-                        "edit history is sensitive."
+                        "Flatten to a single revision before distribution if the edit "
+                        "history is sensitive."
                     ),
                 )
             )

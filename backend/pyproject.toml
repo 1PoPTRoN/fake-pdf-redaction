@@ -1,0 +1,42 @@
+[project]
+name = "pdf-auditor-backend"
+version = "0.1.0"
+description = "FastAPI wrapper around pdfaudit — scans PDFs for recoverable content behind redactions."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.20",
+    "pdfaudit",                                 # sibling project, resolved via [tool.uv.sources] below
+    "pikepdf>=8,<12",                           # pin to pdfaudit's upper bound
+    "reportlab>=4.2",                           # for the /scan/pdf summary report
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx2>=2.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning:importlib",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# Install pdfaudit from the sibling project's root (it has its own
+# pyproject.toml at the top of fake-pdf-redaction/, with `src/` as the
+# package source). This way `uv sync` picks it up automatically.
+[tool.uv.sources]
+pdfaudit = { path = ".." }
