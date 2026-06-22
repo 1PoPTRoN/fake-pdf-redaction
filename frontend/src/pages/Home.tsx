@@ -191,7 +191,7 @@ export function Home({ onReport }: Props) {
               {!item ? (
                 <>
                   DROP A PDF TO BEGIN.{" "}
-                  <span className="text-pink">READ-ONLY</span> — YOUR FILE IS SCANNED IN MEMORY AND DELETED RIGHT AFTER. NOTHING IS STORED.
+                  <span className="text-pink">READ-ONLY</span>. YOUR FILE IS SCANNED IN MEMORY AND DELETED RIGHT AFTER. NOTHING IS STORED.
                 </>
               ) : (
                 <>
