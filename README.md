@@ -1,153 +1,117 @@
-# pdfaudit
+# fake-pdf-redaction
 
-A read-only auditor that detects **recoverable content behind PDF "redactions."**
-It never redacts or modifies anything — it finds the data your black boxes, blurs,
-and "deletions" left behind, and shows it to you as evidence.
+You blacked something out in a PDF. Is it actually gone? Probably not.
 
-The premise: most redaction operates on the *presentation layer* (a rectangle is
-drawn over text) while the *data layer* (the actual characters) is untouched.
-`pdfaudit` works at the data layer and proves whether the protection actually holds.
+This is a read-only auditor that checks PDFs for recoverable content behind redactions. Six detectors run against a document and tell you exactly what leaked, with the recovered bytes in the `evidence` field. It does not modify files. It does not phone home.
 
-## What's in this repo
+## What it catches
 
-| Path | What it is |
-|---|---|
-| [`src/pdfaudit/`](src/pdfaudit/) | The auditor **library + `pdfaudit` CLI** (Python, read-only). The core. |
-| [`backend/`](backend/) | A **FastAPI service** wrapping the library: upload a PDF → JSON report or a one-page PDF summary. See [`backend/README.md`](backend/README.md). |
-| [`frontend/`](frontend/) | A **React + Vite UI** — drop a PDF in the browser and see what your redactions left behind. See [`frontend/README.md`](frontend/README.md). |
-| [`tests/`](tests/) | The library test suite. The generated fixture corpus *is* the executable spec. |
+- `covered_text` — text under a black box that's still extractable
+- `hidden_text` — white-on-white, zero-size fonts, text behind images
+- `revision_history` — content from earlier PDF revisions that an incremental update was supposed to remove
+- `embedded_files` — attachments the redaction didn't touch
+- `metadata` — author, title, XMP fields that shouldn't be there
+- `redact_annotations` — redaction annotations that don't actually redact anything
 
-You can use just the CLI, embed the library, or run the full web app — they all
-sit on the same detection engine.
+Pick a subset with `--only`.
 
-## Install (CLI / library)
+## The three layers
 
-```bash
-pip install -e .            # from a clone
-pip install -e ".[dev]"     # + fixtures & tests
-```
+The repo is a monorepo. Each layer is independent and you can use any of them on its own.
 
-Requires Python ≥ 3.10. Core dependencies: `pikepdf`, `pdfminer.six`, `defusedxml`.
-
-## Usage
+### 1. Python library and CLI (`src/pdfaudit/`)
 
 ```bash
-pdfaudit scan document.pdf                              # human-readable report
-pdfaudit scan document.pdf --json                       # machine-readable (stable contract)
-pdfaudit scan document.pdf --only covered_text,metadata # run specific detectors
-pdfaudit scan document.pdf --fail-on high               # CI release gate
-pdfaudit list-vectors                                   # list detectors
+uv sync
+uv run pdfaudit scan some.pdf
 ```
 
-**Exit codes** (drop-in CI gate): `0` clean / below threshold **and** every detector
-ran · `2` a finding at or above `--fail-on` (default `high`) · `3` scan incomplete —
-a detector errored, so "clean" can't be certified (suppress with `--no-fail-on-error`)
-· `1` usage / I/O error.
+Exit codes drop into CI as-is:
 
-### As a library
+- `0` — clean, or below your threshold
+- `2` — a finding at or above `--fail-on` (default: `high`)
+- `3` — a detector errored, so "clean" can't be certified. Suppress with `--no-fail-on-error` if you trust partial scans
+- `1` — usage or I/O error
+
+JSON is one flag away: `pdfaudit scan some.pdf --json`. Need a stricter gate? `--fail-on medium`. Want a memory cap so a decompression bomb doesn't kill the runner? `--max-memory 1024`.
+
+### 2. FastAPI backend (`backend/`)
+
+The same engine, served over HTTP. Four endpoints:
+
+- `GET  /api/v1/health` — liveness
+- `GET  /api/v1/vectors` — detector names with one-line descriptions
+- `POST /api/v1/scan` — multipart upload, JSON report back
+- `POST /api/v1/scan/pdf` — same, but renders a one-page summary PDF for download
+
+```bash
+cd backend
+uv sync --extra dev
+uv run uvicorn app.main:app --port 8001
+```
+
+### 3. React frontend (`frontend/`)
+
+Vite + TypeScript + Tailwind, neubrutalism styling. Three states: boot loader, home with dropzone, report. Confetti fires only on a clean scan — leaking feels wrong to celebrate.
+
+```bash
+cd frontend
+npm install
+npm run dev   # http://localhost:5174
+```
+
+The Vite dev server proxies `/api/*` to the backend on `:8001`.
+
+## Quick demo
+
+If you don't have a real PDF to test, this is the smallest path to a finding:
 
 ```python
-from pdfaudit import Engine
+# make_boxed.py
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
-report = Engine().scan("document.pdf")
-print(report.worst_severity)
-for f in report.by_severity():
-    print(f.severity.label, f.vector, "->", f.evidence)
-```
-
-### Web UI
-
-A browser front end lives in [`backend/`](backend/) (FastAPI) and
-[`frontend/`](frontend/) (React). In two terminals:
-
-```bash
-# 1) backend  → http://127.0.0.1:8001     (see backend/README.md)
-cd backend && uv run uvicorn app.main:app --port 8001
-
-# 2) frontend → http://localhost:5174      (see frontend/README.md)
-cd frontend && npm install && npm run dev
-```
-
-## What it detects
-
-| Vector | What it catches | Severity |
-|---|---|---|
-| `covered_text` | Extractable text under any **opaque cover** — a filled box of any colour (incl. white-out / Separation / pattern fills) or an image | CRITICAL / HIGH |
-| `hidden_text` | Text rendered to nothing: invisible render mode (`Tr 3`/`7`, incl. inside Form XObjects), or hidden by **colour** (white-on-white), **near-zero size**, or **off-page** position | CRITICAL |
-| `revision_history` | Content recoverable from an **earlier incremental revision**; flags valid-but-unparseable prior revisions instead of passing them as clean | CRITICAL / HIGH / LOW |
-| `embedded_files` | Embedded attachments carrying raw data — name tree (incl. `/Kids`), `/FileAttachment` annotations, and `/AF` associated files | HIGH |
-| `metadata` | Info-dictionary and parsed **XMP** fields (author, software, custom keys), incl. XMP-only identity and per-page metadata | MEDIUM / INFO |
-| `redact_annotations` | `/Redact` annotations marked but **never applied** — recovers the text under the mark, not just the placeholder | CRITICAL |
-
-Each finding carries the **recovered content** as evidence, the page/location where
-applicable, and a fix recommendation.
-
-## Try it yourself
-
-Generate the demo corpus (8 PDFs with planted leaks + clean controls) and scan the
-headline one:
-
-```bash
-python tests/fixtures/gen_fixtures.py
-pdfaudit scan tests/fixtures/corpus/incremental_redaction.pdf
-```
-
-The page reads `Settlement amount is [REDACTED] …`, yet pdfaudit reaches into the
-file's revision history and recovers **`4200000 Acme Holdings`** — the figure that
-was edited out. Nothing on the rendered page shows it.
-
-Plant your own leak — the classic "black box over live text":
-
-```bash
-python - <<'EOF'
-from reportlab.pdfgen.canvas import Canvas
-c = Canvas("/tmp/leaky.pdf", pagesize=(612, 792))
+c = canvas.Canvas("boxed.pdf", pagesize=letter)
 c.setFont("Helvetica", 14)
-c.drawString(72, 700, "Account 9988-7766 PIN 4242 — internal only")
+c.drawString(72, 720, "SSN123-45-6789")
 c.setFillColorRGB(0, 0, 0)
-c.rect(70, 694, 360, 22, fill=1, stroke=0)   # opaque box over the text
-c.showPage(); c.save()
-EOF
-pdfaudit scan /tmp/leaky.pdf      # recovers 9988-7766 and 4242
+c.rect(70, 715, 200, 18, fill=1, stroke=0)
+c.showPage()
+c.save()
 ```
 
-A document that is *actually* clean (text removed, not just covered) returns no
-findings and exit `0` — that round trip (redact → re-audit) is how a future
-verified redactor would gate itself.
+Then:
 
-## How it works
+```bash
+uv run pdfaudit scan boxed.pdf
+```
 
-A single read-only `PDFDocument` is parsed once and shared across independent
-detectors (`analyze(doc) -> [Finding]`). The engine runs each detector in its own
-`try/except`, so one malformed-PDF edge case becomes a recorded error, not a crashed
-scan. Reporting (JSON / CLI) is kept separate from detection. The two non-obvious
-detectors:
+You should see a `critical` finding from `covered_text` with the SSN in `evidence`. That black rectangle didn't redact anything; the text is still sitting in the content stream, fully selectable.
 
-- **Revision history** — PDFs grow by *appending* updates that each end in `%%EOF`,
-  so the bytes up to an earlier `%%EOF` are a loadable earlier version of the file.
-  pdfaudit validates each revision boundary (via the `startxref`→xref back-pointer),
-  then diffs earlier revisions against the current text to recover what a later
-  "redaction" tried to hide.
-- **Covered text** — pdfminer glyph geometry flags characters whose box *overlaps*
-  an opaque cover: a filled rectangle of any colour (black, white-out, or a
-  Separation/pattern fill) or an image. The text is invisible but still present in
-  the content stream.
+## Privacy
+
+Read-only. No file storage. No telemetry. No auth. The backend writes uploads to a temp file and deletes it after scanning. The browser never talks to anything except your local backend through the Vite proxy.
+
+## Layout
+
+```
+fake-pdf-redaction/
+├── src/pdfaudit/      # Python library and CLI
+├── backend/           # FastAPI service
+├── frontend/          # React UI
+├── tests/             # pytest suite (covers all six detectors)
+├── pyproject.toml     # workspace
+└── uv.lock
+```
 
 ## Tests
 
 ```bash
-python -m pytest -q                 # library suite
-cd backend && uv run pytest -q      # API suite
-cd frontend && npm run build        # type-check + build the UI
+uv run pytest -v
 ```
 
-The library's fixture corpus is generated, not committed — read
-[`tests/fixtures/gen_fixtures.py`](tests/fixtures/gen_fixtures.py) to see exactly
-what secret is planted in each PDF, then confirm the tool recovers *that* string.
+The fixture corpus covers the canonical redaction mistakes: black box over text, white text on white, tiny fonts, leftover incremental updates, hidden attachments, and metadata leaks.
 
-## Scope
+## License
 
-Detection only — read-only, no PDF writing. It does not redact, repair, or triage
-malware. A future verified redactor would use this auditor as its fail-closed
-acceptance test.
-```
+MIT.
