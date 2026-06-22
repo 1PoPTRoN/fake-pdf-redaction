@@ -49,6 +49,28 @@ export async function fetchVectors(): Promise<VectorInfo[]> {
   return j.vectors;
 }
 
+/** Lightweight reachability check for the home-page status pill.
+ *  Returns true on any 2xx, false on network error or non-2xx. Never throws. */
+export async function fetchHealth(): Promise<boolean> {
+  try {
+    const r = await fetch(`${API_BASE}/health`, { method: "GET", cache: "no-store" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Backend origin (no path) — used to render the "wake it up" link when the
+ *  service is asleep on a free-tier host. Falls back to the current origin in
+ *  dev so the link still goes somewhere sensible. */
+export function backendOrigin(): string {
+  try {
+    return new URL(API_BASE).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
 export async function scanPdf(
   file: File,
   only?: string[],

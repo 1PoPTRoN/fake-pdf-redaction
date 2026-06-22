@@ -64,3 +64,6 @@ tests/.tmp/
 .env
 .env.local
 .env.*.local
+
+# TypeScript build artifacts
+*.tsbuildinfo

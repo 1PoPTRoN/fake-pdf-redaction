@@ -7,6 +7,7 @@ import { FeatureBox } from "../components/FeatureBox";
 import { Badge } from "../components/Badge";
 import { GridOverlay } from "../components/GridOverlay";
 import { CornerAccents } from "../components/CornerAccents";
+import { BackendStatus } from "../components/BackendStatus";
 import { ScanningLoader } from "../components/ScanningLoader";
 import {
   FileIcon,
@@ -205,6 +206,11 @@ export function Home({ onReport }: Props) {
               loaded={!!item}
             />
           </div>
+        </section>
+
+        {/* BACKEND STATUS — sits just above the footer, centered */}
+        <section className="max-w-5xl mx-auto px-4 sm:px-6 pb-6 sm:pb-8 flex justify-center">
+          <BackendStatus />
         </section>
 
         {/* FOOTER STRIP */}
