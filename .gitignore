@@ -60,6 +60,7 @@ tests/fixtures/*.pdf
 tests/output/
 tests/.tmp/
 
-# Deployment tool caches
-.render/
-.vercel/
+# Local env files (Vercel reads its own env at build time, not these)
+.env
+.env.local
+.env.*.local
