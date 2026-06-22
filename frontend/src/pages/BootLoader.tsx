@@ -72,7 +72,8 @@ export function BootLoader() {
             reminder, not a new claim. */}
         <h1
           key={step}
-          className="font-display uppercase text-5xl sm:text-7xl tracking-tight text-center brutal-stamp"
+          className="font-display uppercase tracking-tight text-center brutal-stamp"
+          style={{ fontSize: "clamp(1.625rem, 11vw, 4.5rem)" }}
         >
           {step === 0 && "READ-ONLY"}
           {step === 1 && "NOTHING STORED"}

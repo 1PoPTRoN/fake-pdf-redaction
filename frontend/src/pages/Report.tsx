@@ -132,7 +132,10 @@ export function Report({ report, file, onAnother }: Props) {
         {/* CLEAN stamp */}
         {isClean && (
           <div className="mt-12 sm:mt-16 text-center">
-            <p className="font-display uppercase text-3xl sm:text-5xl bg-leaf border-5 border-ink shadow-brutalLg inline-block px-6 py-3 brutal-stamp">
+            <p
+              className="font-display uppercase bg-leaf border-5 border-ink shadow-brutalLg inline-block px-6 py-3 brutal-stamp"
+              style={{ fontSize: "clamp(1.5rem, 7vw, 3rem)" }}
+            >
               nothing to see here
             </p>
           </div>

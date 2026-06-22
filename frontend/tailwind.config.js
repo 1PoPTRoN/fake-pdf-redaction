@@ -35,6 +35,14 @@ export default {
       backgroundSize: {
         halftone: "14px 14px",
       },
+      // Add an xs breakpoint (480px) so the small-phone range has its own
+      // scale. Tailwind ships with sm (640px), md (768px), lg (1024px), xl,
+      // 2xl — but no breakpoint between 0 and 640px. With the brutalist
+      // display font (Archivo Black) being unusually wide, headings need
+      // their own size step *below* sm, not just a mobile default.
+      screens: {
+        xs: "480px",
+      },
     },
   },
   plugins: [],

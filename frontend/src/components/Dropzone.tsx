@@ -44,7 +44,10 @@ export function Dropzone({ onFile, disabled }: Props) {
         </div>
       </div>
 
-      <p className="font-display text-4xl sm:text-6xl uppercase tracking-tight">
+      <p
+        className="font-display uppercase tracking-tight"
+        style={{ fontSize: "clamp(1.5rem, 7vw, 3.75rem)" }}
+      >
         {isDragActive ? "DROP IT!" : "DROP A PDF TO AUDIT"}
       </p>
       <p className="mt-4 font-body text-base sm:text-xl font-bold">
