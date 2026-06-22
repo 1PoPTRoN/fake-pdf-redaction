@@ -238,13 +238,22 @@ export function Home({ onReport }: Props) {
               </a>
               <span className="text-paper/90">
                 <a
-                  href="mailto:vrxn.arp1traj@gmail.com"
+                  href="https://www.linkedin.com/in/arp1traj/"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="hover:underline"
                 >
                   Arpit Raj
                 </a>
                 <span className="text-paper/50"> · </span>
-                <span className="text-paper/70">1PoPTRoN</span>
+                <a
+                  href="https://github.com/1PoPTRoN"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-paper/70 hover:underline"
+                >
+                  1PoPTRoN
+                </a>
                 <span className="text-paper/50"> · </span>
                 <a
                   href="mailto:vrxn.arp1traj@gmail.com"
